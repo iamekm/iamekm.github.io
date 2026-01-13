@@ -1,0 +1,1900 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>B made planning: Gantt + severity</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/luxon/3.5.0/luxon.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+
+<script>
+  console.log("XLSX:", typeof XLSX);
+  console.log("Luxon:", typeof luxon);
+  console.log("d3:", typeof d3);
+</script>
+
+  <style>
+    :root {
+      --bg: #0b0c10;
+      --panel: #11131a;
+      --text: #e7e7e7;
+      --muted: #a7a7a7;
+      --grid: #2a2f3a;
+      --accent: #7aa2ff;
+      --warn: #ffb86b;
+      --bad: #ff6b6b;
+      --good: #6bffb3;
+    }
+
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    header {
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--grid);
+      background: linear-gradient(180deg, #0e1018, #0b0c10);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    header h1 {
+      margin: 0 0 6px 0;
+      font-size: 18px;
+      font-weight: 650;
+      letter-spacing: 0.2px;
+    }
+
+    header p {
+      margin: 0;
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.35;
+    }
+
+    .wrap {
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      gap: 12px;
+      padding: 12px;
+    }
+
+    @media (max-width: 1050px) {
+      .wrap { grid-template-columns: 1fr; }
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--grid);
+      border-radius: 14px;
+      padding: 12px;
+      box-shadow: 0 8px 22px rgba(0,0,0,0.25);
+    }
+
+    .card h2 {
+      margin: 0 0 10px 0;
+      font-size: 14px;
+      font-weight: 650;
+      color: #f1f1f1;
+    }
+
+    label {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      margin: 10px 0 6px;
+    }
+
+    input[type="file"] {
+      width: 100%;
+      padding: 10px;
+      border-radius: 10px;
+      border: 1px dashed #3a4152;
+      background: #0f1118;
+      color: var(--text);
+    }
+
+    select, input[type="date"], input[type="number"], button {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 9px 10px;
+      border-radius: 10px;
+      border: 1px solid #2e3441;
+      background: #0f1118;
+      color: var(--text);
+      outline: none;
+    }
+
+    select[multiple] {
+      height: 120px;
+      padding: 8px;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .pill {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid #2e3441;
+      background: #0f1118;
+      color: var(--muted);
+      font-size: 12px;
+      margin-right: 8px;
+      margin-top: 8px;
+    }
+
+    .btnrow {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    button {
+      cursor: pointer;
+      font-weight: 650;
+      border: 1px solid #33405a;
+      background: rgba(122,162,255,0.14);
+    }
+
+    button.secondary {
+      background: #0f1118;
+      border: 1px solid #2e3441;
+      font-weight: 600;
+      color: var(--muted);
+    }
+
+    button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    .status {
+      margin-top: 10px;
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.35;
+      white-space: pre-wrap;
+    }
+
+    .vizgrid {
+      display: grid;
+      grid-template-rows: auto auto;
+      gap: 12px;
+    }
+
+    .viz {
+      position: relative;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin: 8px 0 0 0;
+    }
+
+    .toolbar .pill strong { color: var(--text); font-weight: 650; }
+
+    .svgwrap {
+      width: 100%;
+      overflow: auto;
+      border-radius: 12px;
+      border: 1px solid var(--grid);
+      background: #0a0b11;
+    }
+
+    .legend {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-top: 10px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .swatch {
+      width: 10px;
+      height: 10px;
+      border-radius: 3px;
+      display: inline-block;
+      border: 1px solid #2e3441;
+      margin-right: 6px;
+    }
+
+    .note {
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.35;
+    }
+
+    .kpi {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .kpi .box {
+      border: 1px solid var(--grid);
+      border-radius: 12px;
+      padding: 10px;
+      background: #0f1118;
+    }
+
+    .kpi .box .big {
+      font-size: 18px;
+      font-weight: 750;
+      color: #f2f2f2;
+      margin-bottom: 4px;
+    }
+
+    .kpi .box .small {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .axis text { fill: #aeb6c6; font-size: 11px; }
+    .axis path, .axis line { stroke: #2a2f3a; }
+
+    .grid line { stroke: #1b1f2a; }
+
+    .task {
+      stroke: rgba(0,0,0,0.35);
+      stroke-width: 1;
+      rx: 5;
+      ry: 5;
+    }
+
+    .task:hover { stroke: rgba(255,255,255,0.65); stroke-width: 1.2; }
+
+    .tooltip {
+      position: absolute;
+      pointer-events: none;
+      z-index: 20;
+      background: rgba(17,19,26,0.96);
+      border: 1px solid #2e3441;
+      border-radius: 12px;
+      padding: 10px;
+      color: #f1f1f1;
+      font-size: 12px;
+      max-width: 320px;
+      box-shadow: 0 12px 30px rgba(0,0,0,0.35);
+      opacity: 0;
+      transform: translateY(6px);
+      transition: opacity 120ms ease, transform 120ms ease;
+      white-space: pre-wrap;
+    }
+
+    .tooltip strong { font-weight: 750; }
+
+    .heatcell {
+      stroke: #151824;
+      stroke-width: 1;
+      rx: 5;
+      ry: 5;
+    }
+  
+    .stats-wrap {
+      width: 100%;
+      overflow: auto;
+      border-radius: 12px;
+      border: 1px solid var(--grid);
+      background: #0a0b11;
+      padding: 8px;
+    }
+
+    table.stats-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    .stats-table th {
+      text-align: left;
+      padding: 8px;
+      border-bottom: 1px solid var(--grid);
+      color: #aeb6c6;
+      font-weight: 650;
+      position: sticky;
+      top: 0;
+      background: #0a0b11;
+      z-index: 1;
+    }
+
+    .stats-table td {
+      padding: 8px;
+      border-bottom: 1px solid #171b24;
+      color: #e7e7e7;
+      vertical-align: top;
+    }
+
+    .stats-table td.num,
+    .stats-table th.num {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .stats-kpi {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .stats-kpi .box {
+      border: 1px solid var(--grid);
+      border-radius: 12px;
+      padding: 10px;
+      background: #0f1118;
+    }
+
+    .stats-kpi .box .big {
+      font-size: 16px;
+      font-weight: 750;
+      color: #f2f2f2;
+      margin-bottom: 4px;
+    }
+
+    .stats-kpi .box .small {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+
+    .courseHeader { pointer-events: none; }
+</style>
+</head>
+
+<body>
+<header>
+  <h1>B made workload planner: filterable Gantt + severity heat map</h1>
+  <p>Load Excel file(s), filter by course (sheet), task type, date range, likelihood, and student bucket. Severity is calculated from likelihood and student bucket.</p>
+</header>
+
+<div class="wrap">
+  <div class="card">
+    <h2>1) Load data</h2>
+    <input id="file" type="file" multiple accept=".xlsx,.xls" />
+
+    <div class="kpi">
+      <div class="box">
+        <div class="big" id="kpiTasks">0</div>
+        <div class="small">Tasks loaded</div>
+      </div>
+      <div class="box">
+        <div class="big" id="kpiCourses">0</div>
+        <div class="small">Courses (sheets)</div>
+      </div>
+    </div>
+
+    <div class="status" id="status">No file loaded.</div>
+
+    <h2 style="margin-top:14px;">2) Filters</h2>
+
+    <label>Courses (sheets)</label>
+    <select id="filterCourse" multiple></select>
+
+    <label>Type of task</label>
+    <select id="filterType" multiple></select>
+
+    <label>Location</label>
+    <select id="filterLocation" multiple></select>
+
+
+    <div class="row">
+      <div>
+        <label>Year group</label>
+        <select id="filterYear">
+          <option value="">All</option>
+        </select>
+      </div>
+      <div>
+        <label>Student bucket</label>
+        <select id="filterStudents">
+          <option value="">All</option>
+          <option value="1-10">1-10</option>
+          <option value="10-20">10-20</option>
+          <option value="21+">21+</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label>Likelihood minimum (1 to 3)</label>
+        <select id="filterLikemin">
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+        </select>
+      </div>
+      <div>
+        <label>Likelihood maximum (1 to 3)</label>
+        <select id="filterLikemax">
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3" selected>3</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label>Date from</label>
+        <input id="filterFrom" type="date" />
+      </div>
+      <div>
+        <label>Date to</label>
+        <input id="filterTo" type="date" />
+      </div>
+    </div>
+
+    <div class="btnrow">
+      <button id="apply" disabled>Apply filters</button>
+      <button id="reset" class="secondary" disabled>Reset</button>
+    </div>
+
+    <div class="btnrow">
+      <button id="exportGantt" class="secondary" disabled>Export Gantt as PNG</button>
+      <button id="exportHeat" class="secondary" disabled>Export severity chart as PNG</button>
+    </div>
+
+    <div class="note">
+      <div class="legend">
+        <span><span class="swatch" style="background:rgba(122,162,255,0.70)"></span>Likelihood 1</span>
+        <span><span class="swatch" style="background:rgba(255,184,107,0.70)"></span>Likelihood 2</span>
+        <span><span class="swatch" style="background:rgba(255,107,107,0.72)"></span>Likelihood 3</span>
+      </div>
+      <div class="note">
+        Severity weighting:
+        1-10 → 1, 10-20 → 2, 21+ → 3.
+        Severity per task day = likelihood × bucket weight.
+      </div>
+    </div>
+  </div>
+
+  <div class="vizgrid">
+    <div class="card viz">
+      <h2>Gantt chart</h2>
+      <div class="toolbar" id="ganttMeta"></div>
+      <div class="svgwrap">
+        <svg id="gantt" width="1400" height="620"></svg>
+      </div>
+      <div class="note">Tip: scroll horizontally for longer timelines. Hover tasks for details.</div>
+      <div class="tooltip" id="tooltip"></div>
+    </div>
+
+    <div class="card viz">
+      <h2>Severity line graph (weekly)</h2>
+      <div class="toolbar" id="heatMeta"></div>
+      <div class="svgwrap">
+        <svg id="heat" width="1400" height="520"></svg>
+      </div>
+      <div class="note">Line graph shows weekly total severity per course (sheet).</div>
+
+      <h2 style="margin-top:14px;">Severity heat map (weekly blocks)</h2>
+      <div class="svgwrap">
+        <svg id="heatBlocks" width="1400" height="360"></svg>
+      </div>
+      <div class="note">Blocks show weekly severity totals (darker = busier). Scroll to see all courses or weeks.</div>
+
+      <h2 style="margin-top:14px;">Total severity curve (all programmes)</h2>
+      <div class="svgwrap">
+        <svg id="totalCurve" width="1400" height="260"></svg>
+      </div>
+      <div class="note">Single curve that sums weekly severity across all programmes, using the current filters.</div>
+
+      <h2 style="margin-top:14px;">Severity curves by location</h2>
+      <div class="svgwrap">
+        <svg id="locationCurves" width="1400" height="360"></svg>
+      </div>
+      <div class="note">Weekly severity summed by location (top locations shown; remainder grouped as Other).</div>
+
+    </div>
+
+    <div class="card viz">
+      <h2>Heaviest users by course</h2>
+      <div class="toolbar" id="statsMeta"></div>
+      <div id="courseStatsBody" class="stats-wrap"></div>
+      <div class="note">Totals reflect the current filters. Total severity sums (likelihood × student weight) for every day in each activity range.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const DateTime = luxon.DateTime;
+
+  // --- column name normalisation ---
+  function normKey(s) {
+    return String(s || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .replace(/[\u2013\u2014]/g, "-");
+  }
+
+  // Accepts minor variations in headings
+const COLMAP = {
+  module: ["module", "module name", "module title", "modulename"],
+  year: ["year", "year group", "yeargroup"],
+  type: ["task", "type of task", "task type", "type", "activity type"],
+  likelihood: [
+    "likelihood of b-made input expected",
+    "a measure of likelihood of input needed (from 1 to 3)",
+    "likelihood",
+    "input likelihood",
+    "likelihood of input needed"
+  ],
+  students: [
+    "level of b-made input expected",
+    "a measure of number of students (1-10, 10-20, 21+)",
+    "number of students",
+    "students",
+    "student bucket",
+    "cohort size"
+  ],
+  start: ["activity start", "date of activity start", "activity start date", "start date", "date start"],
+  finish: ["activity end", "date of activity finish", "activity end date", "finish date", "end date", "date finish"],
+  location: ["location", "site", "room", "space", "campus"]
+};
+
+  function findCol(headers, wantList) {
+    for (const want of wantList) {
+      const idx = headers.findIndex(h => normKey(h) === normKey(want));
+      if (idx >= 0) return idx;
+    }
+    // fallback: fuzzy contains
+    for (let i = 0; i < headers.length; i++) {
+      const h = normKey(headers[i]);
+      for (const want of wantList) {
+        const w = normKey(want);
+        if (h.includes(w) || w.includes(h)) return i;
+      }
+    }
+    return -1;
+  }
+
+  function excelDateToISO(v) {
+    // v may be a Date, a number serial, or a string.
+    if (v == null || v === "") return null;
+
+    if (v instanceof Date) {
+      const dt = DateTime.fromJSDate(v, { zone: "utc" });
+      return dt.isValid ? dt.toISODate() : null;
+    }
+
+    if (typeof v === "number") {
+      // Excel serial date (SheetJS uses 1900-based)
+      const parsed = XLSX.SSF.parse_date_code(v);
+      if (!parsed) return null;
+      const dt = DateTime.utc(parsed.y, parsed.m, parsed.d);
+      return dt.isValid ? dt.toISODate() : null;
+    }
+
+    const s = String(v).trim();
+    // Try ISO first
+    let dt = DateTime.fromISO(s, { zone: "utc" });
+    if (dt.isValid) return dt.toISODate();
+
+    // Try common UK formats
+    const formats = ["d/M/yyyy", "dd/MM/yyyy", "d/M/yy", "dd/MM/yy", "d-M-yyyy", "dd-MM-yyyy"];
+    for (const f of formats) {
+      dt = DateTime.fromFormat(s, f, { zone: "utc" });
+      if (dt.isValid) return dt.toISODate();
+    }
+    return null;
+  }
+
+  function clampInt(x, lo, hi) {
+    const n = Number(x);
+    if (!Number.isFinite(n)) return null;
+    return Math.max(lo, Math.min(hi, Math.round(n)));
+  }
+
+  function studentWeight(bucket) {
+    const b = String(bucket || "").trim();
+    if (b === "1-10") return 1;
+    if (b === "10-20") return 2;
+    if (b === "21+") return 3;
+    // fallback if numbers appear
+    const m = b.match(/(\d+)\s*\+?/);
+    if (m) {
+      const n = Number(m[1]);
+      if (n <= 10) return 1;
+      if (n <= 20) return 2;
+      return 3;
+    }
+    return 1;
+  }
+
+  function likelihoodColour(lik) {
+    if (lik === 1) return "rgba(122,162,255,0.70)";
+    if (lik === 2) return "rgba(255,184,107,0.70)";
+    return "rgba(255,107,107,0.72)";
+  }
+
+  // --- state ---
+  let allTasks = [];
+  let filteredTasks = [];
+
+  // --- dom ---
+  const elFile = document.getElementById("file");
+  const elStatus = document.getElementById("status");
+  const elApply = document.getElementById("apply");
+  const elReset = document.getElementById("reset");
+
+  const elCourse = document.getElementById("filterCourse");
+  const elType = document.getElementById("filterType");
+  const elLocation = document.getElementById("filterLocation");
+  const elYear = document.getElementById("filterYear");
+  const elStudents = document.getElementById("filterStudents");
+  const elLikemin = document.getElementById("filterLikemin");
+  const elLikemax = document.getElementById("filterLikemax");
+  const elFrom = document.getElementById("filterFrom");
+  const elTo = document.getElementById("filterTo");
+
+  const kpiTasks = document.getElementById("kpiTasks");
+  const kpiCourses = document.getElementById("kpiCourses");
+
+  const svgG = d3.select("#gantt");
+  const svgH = d3.select("#heat");
+
+  const ganttMeta = document.getElementById("ganttMeta");
+  const heatMeta = document.getElementById("heatMeta");
+  const statsMeta = document.getElementById("statsMeta");
+
+  const elExportGantt = document.getElementById("exportGantt");
+  const elExportHeat = document.getElementById("exportHeat");
+
+  const tooltip = document.getElementById("tooltip");
+
+  function setStatus(msg) {
+    elStatus.textContent = msg;
+  }
+
+  function setEnabled(yes) {
+    elApply.disabled = !yes;
+    elReset.disabled = !yes;
+    elExportGantt.disabled = !yes;
+    elExportHeat.disabled = !yes;
+  }
+
+  function fillSelectMultiple(select, values) {
+    select.innerHTML = "";
+    for (const v of values) {
+      const opt = document.createElement("option");
+      opt.value = v;
+      opt.textContent = v;
+      opt.selected = true;
+      select.appendChild(opt);
+    }
+  }
+
+  function selectedValues(select) {
+    return Array.from(select.options).filter(o => o.selected).map(o => o.value);
+  }
+
+  function uniqueSorted(arr) {
+    return Array.from(new Set(arr.filter(v => v != null && String(v).trim() !== "")))
+      .map(v => String(v))
+      .sort((a, b) => a.localeCompare(b, "en-GB", { numeric: true }));
+  }
+
+  function formatRangeISO(a, b) {
+    if (!a || !b) return "";
+    return `${a} → ${b}`;
+  }
+
+  function parseWorkbookToTasks(workbook, fileName) {
+    const tasks = [];
+    for (const sheetName of workbook.SheetNames) {
+      const sheet = workbook.Sheets[sheetName];
+      if (!sheet) continue;
+
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: "" });
+      if (!rows || rows.length < 2) continue;
+
+      const headers = rows[0].map(h => String(h || "").trim());
+      const idxModule = findCol(headers, COLMAP.module);
+      const idxYear = findCol(headers, COLMAP.year);
+      const idxType = findCol(headers, COLMAP.type);
+      const idxLike = findCol(headers, COLMAP.likelihood);
+      const idxStud = findCol(headers, COLMAP.students);
+      const idxStart = findCol(headers, COLMAP.start);
+      const idxFin = findCol(headers, COLMAP.finish);
+      const idxLoc = findCol(headers, COLMAP.location);
+
+      const required = [idxModule, idxYear, idxType, idxLike, idxStud, idxStart, idxFin];
+      if (required.some(i => i < 0)) {
+        // skip sheets without the needed structure
+        continue;
+      }
+
+      for (let r = 1; r < rows.length; r++) {
+        const row = rows[r];
+        if (!row || row.length === 0) continue;
+
+        const moduleName = String(row[idxModule] || "").trim();
+        const yearGroup = clampInt(row[idxYear], 1, 9); // architecture years vary, keep generous
+        const type = String(row[idxType] || "").trim();
+        const likelihood = clampInt(row[idxLike], 1, 3);
+        const studentsBucket = String(row[idxStud] || "").trim();
+        const location = (idxLoc >= 0) ? String(row[idxLoc] || "").trim() : "";
+        const startISO = excelDateToISO(row[idxStart]);
+        const finishISO = excelDateToISO(row[idxFin]);
+
+        const hasAny = moduleName || type || startISO || finishISO;
+        if (!hasAny) continue;
+
+        if (!moduleName || !type || !startISO || !finishISO || !likelihood) {
+          // keep but mark as invalid to report
+          tasks.push({
+            valid: false,
+            file: fileName,
+            course: `${fileName} · ${sheetName}`,
+            moduleName,
+            yearGroup,
+            type,
+            likelihood,
+            studentsBucket,
+            location,
+            startISO,
+            finishISO
+          });
+          continue;
+        }
+
+        const s = DateTime.fromISO(startISO, { zone: "utc" });
+        const f = DateTime.fromISO(finishISO, { zone: "utc" });
+        if (!s.isValid || !f.isValid) {
+          tasks.push({ valid: false, file: fileName, course: sheetName, moduleName, yearGroup, type, likelihood, studentsBucket, location, startISO, finishISO });
+          continue;
+        }
+
+        const start = s.startOf("day");
+        const finish = f.startOf("day");
+        const end = finish < start ? start : finish;
+
+        tasks.push({
+          valid: true,
+          file: fileName,
+          course: sheetName,
+          moduleName,
+          yearGroup,
+          type,
+          likelihood,
+          studentsBucket,
+          location,
+          startISO: start.toISODate(),
+          finishISO: end.toISODate(),
+          severityPerDay: likelihood * studentWeight(studentsBucket),
+        });
+      }
+    }
+    return tasks;
+  }
+
+  function refreshFilterOptions() {
+    const valid = allTasks.filter(t => t.valid);
+
+    const courses = uniqueSorted(valid.map(t => t.course));
+    const types = uniqueSorted(valid.map(t => t.type));
+
+    fillSelectMultiple(elCourse, courses);
+    fillSelectMultiple(elType, types);
+
+    
+
+    const locations = uniqueSorted(valid.map(t => (t.location && String(t.location).trim()) ? String(t.location).trim() : "—"));
+    fillSelectMultiple(elLocation, locations);
+// year group single select
+    const years = uniqueSorted(valid.map(t => t.yearGroup).filter(v => v != null));
+    elYear.innerHTML = `<option value="">All</option>` + years.map(y => `<option value="${y}">${y}</option>`).join("");
+
+    // date range defaults
+    const starts = valid.map(t => t.startISO).filter(Boolean).sort();
+    const ends = valid.map(t => t.finishISO).filter(Boolean).sort();
+    if (starts.length) elFrom.value = starts[0];
+    if (ends.length) elTo.value = ends[ends.length - 1];
+
+    kpiTasks.textContent = String(valid.length);
+    kpiCourses.textContent = String(courses.length);
+  }
+
+  function applyFilters() {
+    const courses = new Set(selectedValues(elCourse));
+    const types = new Set(selectedValues(elType));
+    const locations = new Set(selectedValues(elLocation));
+    const year = elYear.value ? Number(elYear.value) : null;
+    const students = elStudents.value || null;
+
+    const likeMin = Number(elLikemin.value || 1);
+    const likeMax = Number(elLikemax.value || 3);
+
+    const from = elFrom.value || null;
+    const to = elTo.value || null;
+
+    const valid = allTasks.filter(t => t.valid);
+
+    filteredTasks = valid.filter(t => {
+      if (courses.size && !courses.has(t.course)) return false;
+      if (types.size && !types.has(t.type)) return false;
+      const loc = (t.location && String(t.location).trim()) ? String(t.location).trim() : "—";
+      if (locations.size && !locations.has(loc)) return false;
+      if (year != null && t.yearGroup !== year) return false;
+      if (students && String(t.studentsBucket).trim() !== students) return false;
+      if (t.likelihood < likeMin || t.likelihood > likeMax) return false;
+
+      // overlap test with filter date window
+      if (from && t.finishISO < from) return false;
+      if (to && t.startISO > to) return false;
+
+      return true;
+    });
+
+    drawAll();
+  }
+
+  function resetFilters() {
+    refreshFilterOptions();
+    elStudents.value = "";
+    elLikemin.value = "1";
+    elLikemax.value = "3";
+    applyFilters();
+  }
+
+  // --- charts ---
+  function drawAll() {
+  drawGantt(filteredTasks);
+  drawSeverityLines(filteredTasks);
+  drawHeatBlocks(filteredTasks);
+  drawTotalCurve(filteredTasks);
+  drawLocationCurves(filteredTasks);
+  renderCourseStats(filteredTasks);
+
+    const startMin = d3.min(filteredTasks, d => d.startISO);
+    const endMax = d3.max(filteredTasks, d => d.finishISO);
+
+    ganttMeta.innerHTML = `
+      <span class="pill"><strong>${filteredTasks.length}</strong> tasks shown</span>
+      <span class="pill">${startMin ? startMin : "—"} → ${endMax ? endMax : "—"}</span>
+    `;
+
+    heatMeta.innerHTML = `
+      <span class="pill"><strong>${filteredTasks.length}</strong> tasks used</span>
+      <span class="pill">weekly aggregation</span>
+    `;
+  }
+
+  function showTooltip(evt, task) {
+    const lines = [
+      `${task.moduleName}`,
+      `Course: ${task.course}`,
+      `Location: ${task.location || "—"}`,
+      `Year: ${task.yearGroup != null ? task.yearGroup : "—"}`,
+      `Task type: ${task.type}`,
+      `Dates: ${task.startISO} → ${task.finishISO}`,
+      `Likelihood: ${task.likelihood}`,
+      `Students: ${task.studentsBucket}`,
+      `Severity per day: ${task.severityPerDay}`
+    ];
+
+    tooltip.innerHTML = `<strong>${lines[0]}</strong>\n` + lines.slice(1).join("\n");
+    tooltip.style.opacity = "1";
+    tooltip.style.transform = "translateY(0px)";
+
+    const rect = evt.currentTarget.ownerSVGElement.getBoundingClientRect();
+    const x = evt.clientX - rect.left + 14;
+    const y = evt.clientY - rect.top + 14;
+
+    tooltip.style.left = `${Math.min(x, rect.width - 340)}px`;
+    tooltip.style.top = `${Math.min(y, rect.height - 160)}px`;
+  }
+
+  function hideTooltip() {
+    tooltip.style.opacity = "0";
+    tooltip.style.transform = "translateY(6px)";
+  }
+
+  
+function drawGantt(tasks) {
+  svgG.selectAll("*").remove();
+
+  const width = 1400;
+
+  if (!tasks.length) {
+    svgG.attr("width", width).attr("height", 620);
+    return;
+  }
+
+  // Helpers for label management
+  function shortLabel(s, max = 26) {
+    const t = String(s || "").trim();
+    if (t.length <= max) return t;
+    return t.slice(0, Math.max(0, max - 1)) + "…";
+  }
+
+  function splitLaneLabel(lane) {
+    const parts = String(lane || "").split(" · ");
+    return {
+      course: parts[0] || String(lane || ""),
+      module: parts.slice(1).join(" · ") || ""
+    };
+  }
+
+  // lanes: course + module
+  const laneKey = d => `${d.course} · ${d.moduleName}`;
+  const lanes = uniqueSorted(tasks.map(laneKey));
+
+  // Dynamic height so labels do not overlap when there are many lanes
+  const rowH = 18; // pixels per lane row (incl padding)
+  const height = Math.max(620, 120 + lanes.length * rowH);
+
+  svgG.attr("width", width).attr("height", height);
+
+  // time domain
+  const minISO = d3.min(tasks, d => d.startISO);
+  const maxISO = d3.max(tasks, d => d.finishISO);
+
+  const minDate = DateTime.fromISO(minISO, { zone: "utc" }).toJSDate();
+  const maxDate = DateTime.fromISO(maxISO, { zone: "utc" }).plus({ days: 1 }).toJSDate();
+
+  // Increase left margin to make room for course headers + module labels
+  const margin = { top: 28, right: 16, bottom: 30, left: 360 };
+  const innerW = width - margin.left - margin.right;
+  const innerH = height - margin.top - margin.bottom;
+
+  const x = d3.scaleTime().domain([minDate, maxDate]).range([0, innerW]);
+  const y = d3.scaleBand().domain(lanes).range([0, innerH]).paddingInner(0.16);
+
+  const g = svgG.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+
+  // background grid by week
+  const xAxis = d3.axisBottom(x).ticks(d3.timeWeek.every(1)).tickFormat(d3.timeFormat("%d %b"));
+
+  // Show only module name (shortened) in the y-axis tick labels
+  const yAxis = d3.axisLeft(y)
+    .tickSize(0)
+    .tickFormat(d => {
+      const { module } = splitLaneLabel(d);
+      return shortLabel(module || d, 24);
+    });
+
+  g.append("g")
+    .attr("class", "grid")
+    .attr("transform", `translate(0,${innerH})`)
+    .call(d3.axisBottom(x).ticks(d3.timeWeek.every(1)).tickSize(-innerH).tickFormat(() => ""));
+
+  g.append("g")
+    .attr("class", "axis")
+    .attr("transform", `translate(0,${innerH})`)
+    .call(xAxis);
+
+  // y-axis
+  g.append("g")
+    .attr("class", "axis")
+    .call(yAxis)
+    .selectAll("text")
+    .attr("fill", "#aeb6c6")
+    .attr("font-size", 11);
+
+  // Course headers: draw one label per course group (bold), aligned with the first lane in each course
+  const laneMeta = lanes.map(l => ({ lane: l, ...splitLaneLabel(l) }));
+  const grouped = d3.group(laneMeta, d => d.course);
+
+  const firstLanePerCourse = Array.from(grouped, ([course, items]) => {
+    // The lane with the smallest y-position for this course
+    const topLane = items
+      .map(i => i.lane)
+      .sort((a, b) => (y(a) ?? 0) - (y(b) ?? 0))[0];
+    return { course, lane: topLane };
+  }).sort((a, b) => (y(a.lane) ?? 0) - (y(b.lane) ?? 0));
+
+  g.append("g")
+    .selectAll("text.courseHeader")
+    .data(firstLanePerCourse)
+    .enter()
+    .append("text")
+    .attr("class", "courseHeader")
+    .attr("x", -350) // inside left margin area
+    .attr("y", d => (y(d.lane) ?? 0) + 3)
+    .attr("fill", "#f1f1f1")
+    .attr("font-size", 12)
+    .attr("font-weight", 700)
+    .text(d => shortLabel(d.course, 30));
+
+  // tasks
+  const bars = g.append("g");
+
+  bars.selectAll("rect")
+    .data(tasks)
+    .enter()
+    .append("rect")
+    .attr("class", "task")
+    .attr("x", d => x(DateTime.fromISO(d.startISO, { zone: "utc" }).toJSDate()))
+    .attr("y", d => (y(laneKey(d)) ?? 0) + 1)
+    .attr("width", d => {
+      const a = x(DateTime.fromISO(d.startISO, { zone: "utc" }).toJSDate());
+      const b = x(DateTime.fromISO(d.finishISO, { zone: "utc" }).plus({ days: 1 }).toJSDate());
+      return Math.max(2, b - a);
+    })
+    .attr("height", Math.max(10, y.bandwidth() - 2))
+    .attr("fill", d => likelihoodColour(d.likelihood))
+    .on("mousemove", function(evt, d) { showTooltip(evt, d); })
+    .on("mouseleave", hideTooltip);
+
+  // lane separators
+  g.append("g")
+    .selectAll("line")
+    .data(lanes)
+    .enter()
+    .append("line")
+    .attr("x1", 0)
+    .attr("x2", innerW)
+    .attr("y1", d => (y(d) ?? 0) + y.bandwidth())
+    .attr("y2", d => (y(d) ?? 0) + y.bandwidth())
+    .attr("stroke", "#171b24")
+    .attr("stroke-width", 1);
+
+  // title label
+  svgG.append("text")
+    .attr("x", margin.left)
+    .attr("y", 18)
+    .attr("fill", "#aeb6c6")
+    .attr("font-size", 12)
+    .text("Lanes: course · module (each task plotted by its date range)");
+}
+
+
+
+function startOfISOWeek(dt) {
+    // Luxon weekday: Monday=1
+    const diff = dt.weekday - 1;
+    return dt.minus({ days: diff }).startOf("day");
+  }
+
+function drawSeverityLines(tasks) {
+  svgH.selectAll("*").remove();
+
+  const width = 1400;
+  const height = 520;
+  svgH.attr("width", width).attr("height", height);
+
+  if (!tasks.length) return;
+
+  const courses = uniqueSorted(tasks.map(t => t.course));
+
+  const minISO = d3.min(tasks, d => d.startISO);
+  const maxISO = d3.max(tasks, d => d.finishISO);
+
+  const minDT = startOfISOWeek(DateTime.fromISO(minISO, { zone: "utc" }));
+  const maxDT = startOfISOWeek(DateTime.fromISO(maxISO, { zone: "utc" }));
+
+  // build week list
+  const weeks = [];
+  for (let d = minDT; d <= maxDT; d = d.plus({ weeks: 1 })) {
+    weeks.push(d.toISODate());
+  }
+
+  // aggregate severity by course-week
+  const key = (course, weekISO) => `${course}||${weekISO}`;
+  const totals = new Map();
+
+  for (const t of tasks) {
+    const s = DateTime.fromISO(t.startISO, { zone: "utc" }).startOf("day");
+    const f = DateTime.fromISO(t.finishISO, { zone: "utc" }).startOf("day");
+
+    for (let d = s; d <= f; d = d.plus({ days: 1 })) {
+      const w = startOfISOWeek(d).toISODate();
+      const k = key(t.course, w);
+      totals.set(k, (totals.get(k) || 0) + t.severityPerDay);
+    }
+  }
+
+  // shape data for lines
+  const series = courses.map(course => ({
+    course,
+    values: weeks.map(w => ({
+      weekISO: w,
+      date: DateTime.fromISO(w, { zone: "utc" }).toJSDate(),
+      value: totals.get(key(course, w)) || 0
+    }))
+  }));
+
+  const maxVal = d3.max(series, s => d3.max(s.values, v => v.value)) || 1;
+
+  const margin = { top: 30, right: 220, bottom: 40, left: 60 };
+  const innerW = width - margin.left - margin.right;
+  const innerH = height - margin.top - margin.bottom;
+
+  const x = d3.scaleTime()
+    .domain([DateTime.fromISO(weeks[0], { zone: "utc" }).toJSDate(),
+             DateTime.fromISO(weeks[weeks.length - 1], { zone: "utc" }).plus({ weeks: 1 }).toJSDate()])
+    .range([0, innerW]);
+
+  const y = d3.scaleLinear()
+    .domain([0, maxVal])
+    .nice()
+    .range([innerH, 0]);
+
+  const g = svgH.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+
+  // grid
+  g.append("g")
+    .attr("class", "grid")
+    .call(d3.axisLeft(y).ticks(6).tickSize(-innerW).tickFormat(() => ""));
+
+  // axes
+  g.append("g")
+    .attr("class", "axis")
+    .attr("transform", `translate(0,${innerH})`)
+    .call(d3.axisBottom(x).ticks(d3.timeWeek.every(2)).tickFormat(d3.timeFormat("%d %b")));
+
+  g.append("g")
+    .attr("class", "axis")
+    .call(d3.axisLeft(y).ticks(6));
+
+  // line generator
+  const line = d3.line()
+    .x(d => x(d.date))
+    .y(d => y(d.value))
+    .curve(d3.curveMonotoneX);
+
+  // colour per course (do not hardcode colours; use a default categorical scale)
+  const colour = d3.scaleOrdinal()
+    .domain(courses)
+    .range(d3.schemeTableau10.concat(d3.schemeSet3).slice(0, Math.max(10, courses.length)));
+
+  // draw lines
+  const linesG = g.append("g");
+
+  linesG.selectAll("path")
+    .data(series)
+    .enter()
+    .append("path")
+    .attr("fill", "none")
+    .attr("stroke-width", 2)
+    .attr("stroke", d => colour(d.course))
+    .attr("d", d => line(d.values));
+
+  // draw points for hover
+  const points = linesG.selectAll("g.points")
+    .data(series)
+    .enter()
+    .append("g")
+    .attr("class", "points");
+
+  points.selectAll("circle")
+    .data(d => d.values.map(v => ({ ...v, course: d.course })))
+    .enter()
+    .append("circle")
+    .attr("cx", d => x(d.date))
+    .attr("cy", d => y(d.value))
+    .attr("r", 3)
+    .attr("fill", d => colour(d.course))
+    .on("mousemove", function(evt, d) {
+      const rect = evt.currentTarget.ownerSVGElement.getBoundingClientRect();
+      const xPos = evt.clientX - rect.left + 14;
+      const yPos = evt.clientY - rect.top + 14;
+      const dt = DateTime.fromISO(d.weekISO, { zone: "utc" });
+
+      tooltip.innerHTML =
+        `<strong>${d.course}</strong>\n` +
+        `Week commencing: ${dt.toFormat("dd LLL yyyy")}\n` +
+        `Weekly severity: ${d.value.toFixed(0)}`;
+
+      tooltip.style.opacity = "1";
+      tooltip.style.transform = "translateY(0px)";
+      tooltip.style.left = `${Math.min(xPos, rect.width - 340)}px`;
+      tooltip.style.top = `${Math.min(yPos, rect.height - 160)}px`;
+    })
+    .on("mouseleave", hideTooltip);
+
+  // legend (right side)
+  const legend = svgH.append("g")
+    .attr("transform", `translate(${margin.left + innerW + 14},${margin.top})`);
+
+  legend.append("text")
+    .attr("x", 0)
+    .attr("y", 0)
+    .attr("fill", "#aeb6c6")
+    .attr("font-size", 12)
+    .text("Courses");
+
+  const legendItems = legend.selectAll("g.item")
+    .data(courses)
+    .enter()
+    .append("g")
+    .attr("class", "item")
+    .attr("transform", (d, i) => `translate(0,${16 + i * 16})`);
+
+  legendItems.append("rect")
+    .attr("x", 0)
+    .attr("y", -10)
+    .attr("width", 10)
+    .attr("height", 10)
+    .attr("rx", 3)
+    .attr("ry", 3)
+    .attr("fill", d => colour(d));
+
+  legendItems.append("text")
+    .attr("x", 16)
+    .attr("y", -2)
+    .attr("fill", "#aeb6c6")
+    .attr("font-size", 11)
+    .text(d => d);
+}
+
+  function escapeHtml(str) {
+    return String(str)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function renderCourseStats(tasks) {
+    const el = document.getElementById("courseStatsBody");
+    if (!el) return;
+
+    if (!tasks || tasks.length === 0) {
+      el.innerHTML = `<div class="note">No tasks to summarise (check filters).</div>`;
+      if (statsMeta) statsMeta.innerHTML = "";
+      return;
+    }
+
+    const byCourse = new Map();
+
+    for (const t of tasks) {
+      const course = t.course || "—";
+      const s = DateTime.fromISO(t.startISO, { zone: "utc" }).startOf("day");
+      const f = DateTime.fromISO(t.finishISO, { zone: "utc" }).startOf("day");
+      if (!s.isValid || !f.isValid) continue;
+
+      const days = Math.max(1, Math.floor(f.diff(s, "days").days) + 1);
+      const sev = (t.severityPerDay || 0) * days;
+
+      if (!byCourse.has(course)) {
+        byCourse.set(course, { course, totalSeverity: 0, totalTaskDays: 0, tasksCount: 0 });
+      }
+      const agg = byCourse.get(course);
+      agg.totalSeverity += sev;
+      agg.totalTaskDays += days;
+      agg.tasksCount += 1;
+    }
+
+    const rows = Array.from(byCourse.values())
+      .map(r => ({
+        ...r,
+        avgSeverityPerDay: r.totalTaskDays ? (r.totalSeverity / r.totalTaskDays) : 0
+      }))
+      .sort((a, b) => b.totalSeverity - a.totalSeverity);
+
+    const totalSeverityAll = rows.reduce((acc, r) => acc + r.totalSeverity, 0);
+    const totalTaskDaysAll = rows.reduce((acc, r) => acc + r.totalTaskDays, 0);
+    const totalTasksAll = rows.reduce((acc, r) => acc + r.tasksCount, 0);
+
+    const top = rows.slice(0, 10);
+
+    if (statsMeta) {
+      statsMeta.innerHTML = `
+        <span class="pill"><strong>${rows.length}</strong> courses</span>
+        <span class="pill"><strong>${totalTasksAll}</strong> tasks</span>
+        <span class="pill"><strong>${totalSeverityAll.toFixed(0)}</strong> total severity</span>
+      `;
+    }
+
+    el.innerHTML = `
+      <div class="stats-kpi">
+        <div class="box">
+          <div class="big">${rows[0] ? escapeHtml(rows[0].course) : "—"}</div>
+          <div class="small">Highest total severity</div>
+        </div>
+        <div class="box">
+          <div class="big">${(rows[0] ? rows[0].totalSeverity : 0).toFixed(0)}</div>
+          <div class="small">Top course severity</div>
+        </div>
+        <div class="box">
+          <div class="big">${totalTaskDaysAll}</div>
+          <div class="small">Task-days (all courses)</div>
+        </div>
+        <div class="box">
+          <div class="big">${(totalTaskDaysAll ? (totalSeverityAll / totalTaskDaysAll) : 0).toFixed(2)}</div>
+          <div class="small">Average severity per day (all)</div>
+        </div>
+      </div>
+
+      <table class="stats-table">
+        <thead>
+          <tr>
+            <th>Rank</th>
+            <th>Course</th>
+            <th class="num">Total severity</th>
+            <th class="num">Task-days</th>
+            <th class="num">Tasks</th>
+            <th class="num">Avg severity/day</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${top.map((r, i) => `
+            <tr>
+              <td style="color:#aeb6c6;">${i + 1}</td>
+              <td>${escapeHtml(r.course)}</td>
+              <td class="num">${r.totalSeverity.toFixed(0)}</td>
+              <td class="num">${r.totalTaskDays}</td>
+              <td class="num">${r.tasksCount}</td>
+              <td class="num">${r.avgSeverityPerDay.toFixed(2)}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    `;
+  }
+
+
+  
+function drawHeatBlocks(tasks) {
+  const svgB = d3.select("#heatBlocks");
+  if (svgB.empty()) return;
+
+  svgB.selectAll("*").remove();
+
+  const width = 1400;
+
+  if (!tasks || !tasks.length) {
+    svgB.attr("width", width).attr("height", 120);
+    return;
+  }
+
+  const courses = uniqueSorted(tasks.map(t => t.course));
+  const minISO = d3.min(tasks, d => d.startISO);
+  const maxISO = d3.max(tasks, d => d.finishISO);
+
+  const minDT = startOfISOWeek(DateTime.fromISO(minISO, { zone: "utc" }));
+  const maxDT = startOfISOWeek(DateTime.fromISO(maxISO, { zone: "utc" }));
+
+  const weeks = [];
+  for (let d = minDT; d <= maxDT; d = d.plus({ weeks: 1 })) {
+    weeks.push(d.toISODate());
+  }
+
+  // Aggregate severity by course-week (sum of severity per day across all task days)
+  const key = (course, weekISO) => `${course}||${weekISO}`;
+  const totals = new Map();
+
+  for (const t of tasks) {
+    const s = DateTime.fromISO(t.startISO, { zone: "utc" }).startOf("day");
+    const f = DateTime.fromISO(t.finishISO, { zone: "utc" }).startOf("day");
+    if (!s.isValid || !f.isValid) continue;
+
+    for (let d = s; d <= f; d = d.plus({ days: 1 })) {
+      const w = startOfISOWeek(d).toISODate();
+      const k = key(t.course, w);
+      totals.set(k, (totals.get(k) || 0) + (t.severityPerDay || 0));
+    }
+  }
+
+  const data = [];
+  for (const c of courses) {
+    for (const w of weeks) {
+      data.push({ course: c, week: w, value: totals.get(key(c, w)) || 0 });
+    }
+  }
+
+  const maxVal = d3.max(data, d => d.value) || 1;
+
+  // dynamic height so labels do not collide (scroll happens in svgwrap)
+  const rowH = 18;
+  const height = Math.max(220, 70 + courses.length * rowH);
+
+  svgB.attr("width", width).attr("height", height);
+
+  const margin = { top: 30, right: 16, bottom: 40, left: 240 };
+  const innerW = width - margin.left - margin.right;
+  const innerH = height - margin.top - margin.bottom;
+
+  const x = d3.scaleBand().domain(weeks).range([0, innerW]).padding(0.08);
+  const y = d3.scaleBand().domain(courses).range([0, innerH]).padding(0.14);
+
+  // Dark-to-light intensity. Keep within the existing palette.
+  const colour = d3.scaleLinear()
+    .domain([0, maxVal])
+    .range(["rgba(15,17,24,1)", "rgba(255,107,107,0.85)"]);
+
+  const g = svgB.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+
+  // axes (sparser x ticks)
+  const tickWeeks = weeks.filter((_, i) => i % 2 === 0);
+  const xAxis = d3.axisBottom(x).tickValues(tickWeeks).tickFormat(w => {
+    const dt = DateTime.fromISO(w, { zone: "utc" });
+    return dt.toFormat("dd LLL");
+  });
+
+  g.append("g")
+    .attr("class", "axis")
+    .attr("transform", `translate(0,${innerH})`)
+    .call(xAxis)
+    .selectAll("text")
+    .attr("transform", "rotate(-30)")
+    .style("text-anchor", "end");
+
+  g.append("g")
+    .attr("class", "axis")
+    .call(d3.axisLeft(y).tickSize(0));
+
+  g.selectAll("rect")
+    .data(data)
+    .enter()
+    .append("rect")
+    .attr("class", "heatcell")
+    .attr("x", d => x(d.week))
+    .attr("y", d => y(d.course))
+    .attr("width", x.bandwidth())
+    .attr("height", y.bandwidth())
+    .attr("fill", d => colour(d.value))
+    .on("mousemove", function(evt, d) {
+      const rect = evt.currentTarget.ownerSVGElement.getBoundingClientRect();
+      const xPos = evt.clientX - rect.left + 14;
+      const yPos = evt.clientY - rect.top + 14;
+      const dt = DateTime.fromISO(d.week, { zone: "utc" });
+
+      tooltip.innerHTML =
+        `<strong>${d.course}</strong>\n` +
+        `Week commencing: ${dt.toFormat("dd LLL yyyy")}\n` +
+        `Weekly severity: ${d.value.toFixed(0)}`;
+
+      tooltip.style.opacity = "1";
+      tooltip.style.transform = "translateY(0px)";
+      tooltip.style.left = `${Math.min(xPos, rect.width - 340)}px`;
+      tooltip.style.top = `${Math.min(yPos, rect.height - 160)}px`;
+    })
+    .on("mouseleave", hideTooltip);
+
+  svgB.append("text")
+    .attr("x", margin.left)
+    .attr("y", 18)
+    .attr("fill", "#aeb6c6")
+    .attr("font-size", 12)
+    .text("Weekly severity blocks by course (sheet).");
+}
+
+
+function drawTotalCurve(tasks) {
+  const svgT = d3.select("#totalCurve");
+  if (svgT.empty()) return;
+
+  svgT.selectAll("*").remove();
+
+  const width = 1400;
+  const height = 260;
+  svgT.attr("width", width).attr("height", height);
+
+  if (!tasks || !tasks.length) return;
+
+  const minISO = d3.min(tasks, d => d.startISO);
+  const maxISO = d3.max(tasks, d => d.finishISO);
+
+  const minDT = startOfISOWeek(DateTime.fromISO(minISO, { zone: "utc" }));
+  const maxDT = startOfISOWeek(DateTime.fromISO(maxISO, { zone: "utc" }));
+
+  const weeks = [];
+  for (let d = minDT; d <= maxDT; d = d.plus({ weeks: 1 })) {
+    weeks.push(d.toISODate());
+  }
+
+  const totals = new Map(); // weekISO -> value
+
+  for (const t of tasks) {
+    const s = DateTime.fromISO(t.startISO, { zone: "utc" }).startOf("day");
+    const f = DateTime.fromISO(t.finishISO, { zone: "utc" }).startOf("day");
+    if (!s.isValid || !f.isValid) continue;
+
+    for (let d = s; d <= f; d = d.plus({ days: 1 })) {
+      const w = startOfISOWeek(d).toISODate();
+      totals.set(w, (totals.get(w) || 0) + (t.severityPerDay || 0));
+    }
+  }
+
+  const data = weeks.map(w => ({
+    weekISO: w,
+    date: DateTime.fromISO(w, { zone: "utc" }).toJSDate(),
+    value: totals.get(w) || 0
+  }));
+
+  const maxVal = d3.max(data, d => d.value) || 1;
+
+  const margin = { top: 24, right: 20, bottom: 36, left: 60 };
+  const innerW = width - margin.left - margin.right;
+  const innerH = height - margin.top - margin.bottom;
+
+  const x = d3.scaleTime()
+    .domain([data[0].date, DateTime.fromISO(weeks[weeks.length - 1], { zone: "utc" }).plus({ weeks: 1 }).toJSDate()])
+    .range([0, innerW]);
+
+  const y = d3.scaleLinear().domain([0, maxVal]).nice().range([innerH, 0]);
+
+  const g = svgT.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+
+  g.append("g")
+    .attr("class", "grid")
+    .call(d3.axisLeft(y).ticks(4).tickSize(-innerW).tickFormat(() => ""));
+
+  g.append("g")
+    .attr("class", "axis")
+    .attr("transform", `translate(0,${innerH})`)
+    .call(d3.axisBottom(x).ticks(d3.timeWeek.every(2)).tickFormat(d3.timeFormat("%d %b")));
+
+  g.append("g")
+    .attr("class", "axis")
+    .call(d3.axisLeft(y).ticks(4));
+
+  const line = d3.line()
+    .x(d => x(d.date))
+    .y(d => y(d.value))
+    .curve(d3.curveMonotoneX);
+
+  g.append("path")
+    .datum(data)
+    .attr("fill", "none")
+    .attr("stroke", "rgba(122,162,255,0.95)")
+    .attr("stroke-width", 2.5)
+    .attr("d", line);
+
+  g.selectAll("circle")
+    .data(data)
+    .enter()
+    .append("circle")
+    .attr("cx", d => x(d.date))
+    .attr("cy", d => y(d.value))
+    .attr("r", 3)
+    .attr("fill", "rgba(122,162,255,0.95)")
+    .on("mousemove", function(evt, d) {
+      const rect = evt.currentTarget.ownerSVGElement.getBoundingClientRect();
+      const xPos = evt.clientX - rect.left + 14;
+      const yPos = evt.clientY - rect.top + 14;
+      const dt = DateTime.fromISO(d.weekISO, { zone: "utc" });
+
+      tooltip.innerHTML =
+        `<strong>All programmes</strong>\n` +
+        `Week commencing: ${dt.toFormat("dd LLL yyyy")}\n` +
+        `Weekly severity: ${d.value.toFixed(0)}`;
+
+      tooltip.style.opacity = "1";
+      tooltip.style.transform = "translateY(0px)";
+      tooltip.style.left = `${Math.min(xPos, rect.width - 340)}px`;
+      tooltip.style.top = `${Math.min(yPos, rect.height - 160)}px`;
+    })
+    .on("mouseleave", hideTooltip);
+
+  svgT.append("text")
+    .attr("x", margin.left)
+    .attr("y", 16)
+    .attr("fill", "#aeb6c6")
+    .attr("font-size", 12)
+    .text("Total weekly severity (all programmes).");
+}
+
+function drawLocationCurves(tasks) {
+  const svgL = d3.select("#locationCurves");
+  if (svgL.empty()) return;
+
+  svgL.selectAll("*").remove();
+
+  const width = 1400;
+  const height = 360;
+  svgL.attr("width", width).attr("height", height);
+
+  if (!tasks || !tasks.length) return;
+
+  const minISO = d3.min(tasks, d => d.startISO);
+  const maxISO = d3.max(tasks, d => d.finishISO);
+
+  const minDT = startOfISOWeek(DateTime.fromISO(minISO, { zone: "utc" }));
+  const maxDT = startOfISOWeek(DateTime.fromISO(maxISO, { zone: "utc" }));
+
+  const weeks = [];
+  for (let d = minDT; d <= maxDT; d = d.plus({ weeks: 1 })) {
+    weeks.push(d.toISODate());
+  }
+
+  // Aggregate by location-week
+  const totals = new Map(); // `${loc}||${week}` -> value
+  const locTotals = new Map(); // loc -> total
+
+  function locName(t) {
+    const raw = String(t.location || "").trim();
+    return raw ? raw : "Unspecified";
+  }
+
+  for (const t of tasks) {
+    const loc = locName(t);
+    const s = DateTime.fromISO(t.startISO, { zone: "utc" }).startOf("day");
+    const f = DateTime.fromISO(t.finishISO, { zone: "utc" }).startOf("day");
+    if (!s.isValid || !f.isValid) continue;
+
+    for (let d = s; d <= f; d = d.plus({ days: 1 })) {
+      const w = startOfISOWeek(d).toISODate();
+      const k = `${loc}||${w}`;
+      const add = (t.severityPerDay || 0);
+      totals.set(k, (totals.get(k) || 0) + add);
+      locTotals.set(loc, (locTotals.get(loc) || 0) + add);
+    }
+  }
+
+  // pick top locations by overall severity, group the rest as "Other"
+  const ranked = Array.from(locTotals.entries()).sort((a, b) => b[1] - a[1]);
+  const topN = 8;
+  const keep = new Set(ranked.slice(0, topN).map(d => d[0]));
+  const hasOther = ranked.length > topN;
+
+  const locations = ranked.slice(0, topN).map(d => d[0]);
+  if (hasOther) locations.push("Other");
+
+  // build series
+  const series = locations.map(loc => {
+    const values = weeks.map(w => {
+      if (loc === "Other") {
+        // sum all non-kept locations
+        let v = 0;
+        for (const [name] of ranked.slice(topN)) {
+          v += totals.get(`${name}||${w}`) || 0;
+        }
+        return { weekISO: w, date: DateTime.fromISO(w, { zone: "utc" }).toJSDate(), value: v };
+      }
+      return {
+        weekISO: w,
+        date: DateTime.fromISO(w, { zone: "utc" }).toJSDate(),
+        value: totals.get(`${loc}||${w}`) || 0
+      };
+    });
+    return { loc, values };
+  });
+
+  const maxVal = d3.max(series, s => d3.max(s.values, v => v.value)) || 1;
+
+  const margin = { top: 30, right: 220, bottom: 40, left: 60 };
+  const innerW = width - margin.left - margin.right;
+  const innerH = height - margin.top - margin.bottom;
+
+  const x = d3.scaleTime()
+    .domain([DateTime.fromISO(weeks[0], { zone: "utc" }).toJSDate(),
+             DateTime.fromISO(weeks[weeks.length - 1], { zone: "utc" }).plus({ weeks: 1 }).toJSDate()])
+    .range([0, innerW]);
+
+  const y = d3.scaleLinear().domain([0, maxVal]).nice().range([innerH, 0]);
+
+  const g = svgL.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+
+  g.append("g")
+    .attr("class", "grid")
+    .call(d3.axisLeft(y).ticks(5).tickSize(-innerW).tickFormat(() => ""));
+
+  g.append("g")
+    .attr("class", "axis")
+    .attr("transform", `translate(0,${innerH})`)
+    .call(d3.axisBottom(x).ticks(d3.timeWeek.every(2)).tickFormat(d3.timeFormat("%d %b")));
+
+  g.append("g")
+    .attr("class", "axis")
+    .call(d3.axisLeft(y).ticks(5));
+
+  const line = d3.line()
+    .x(d => x(d.date))
+    .y(d => y(d.value))
+    .curve(d3.curveMonotoneX);
+
+  const colour = d3.scaleOrdinal()
+    .domain(locations)
+    .range(d3.schemeTableau10.concat(d3.schemeSet3).slice(0, Math.max(10, locations.length)));
+
+  const linesG = g.append("g");
+
+  linesG.selectAll("path")
+    .data(series)
+    .enter()
+    .append("path")
+    .attr("fill", "none")
+    .attr("stroke-width", 2)
+    .attr("stroke", d => colour(d.loc))
+    .attr("d", d => line(d.values));
+
+  // points for hover
+  const points = linesG.selectAll("g.points")
+    .data(series)
+    .enter()
+    .append("g")
+    .attr("class", "points");
+
+  points.selectAll("circle")
+    .data(d => d.values.map(v => ({ ...v, loc: d.loc })))
+    .enter()
+    .append("circle")
+    .attr("cx", d => x(d.date))
+    .attr("cy", d => y(d.value))
+    .attr("r", 3)
+    .attr("fill", d => colour(d.loc))
+    .on("mousemove", function(evt, d) {
+      const rect = evt.currentTarget.ownerSVGElement.getBoundingClientRect();
+      const xPos = evt.clientX - rect.left + 14;
+      const yPos = evt.clientY - rect.top + 14;
+      const dt = DateTime.fromISO(d.weekISO, { zone: "utc" });
+
+      tooltip.innerHTML =
+        `<strong>${d.loc}</strong>\n` +
+        `Week commencing: ${dt.toFormat("dd LLL yyyy")}\n` +
+        `Weekly severity: ${d.value.toFixed(0)}`;
+
+      tooltip.style.opacity = "1";
+      tooltip.style.transform = "translateY(0px)";
+      tooltip.style.left = `${Math.min(xPos, rect.width - 340)}px`;
+      tooltip.style.top = `${Math.min(yPos, rect.height - 160)}px`;
+    })
+    .on("mouseleave", hideTooltip);
+
+  // legend (right side)
+  const legend = svgL.append("g")
+    .attr("transform", `translate(${margin.left + innerW + 14},${margin.top})`);
+
+  legend.append("text")
+    .attr("x", 0)
+    .attr("y", 0)
+    .attr("fill", "#aeb6c6")
+    .attr("font-size", 12)
+    .text("Locations");
+
+  const legendItems = legend.selectAll("g.item")
+    .data(locations)
+    .enter()
+    .append("g")
+    .attr("class", "item")
+    .attr("transform", (d, i) => `translate(0,${16 + i * 16})`);
+
+  legendItems.append("rect")
+    .attr("x", 0)
+    .attr("y", -10)
+    .attr("width", 10)
+    .attr("height", 10)
+    .attr("rx", 3)
+    .attr("ry", 3)
+    .attr("fill", d => colour(d));
+
+  legendItems.append("text")
+    .attr("x", 16)
+    .attr("y", -2)
+    .attr("fill", "#aeb6c6")
+    .attr("font-size", 11)
+    .text(d => d);
+
+  svgL.append("text")
+    .attr("x", margin.left)
+    .attr("y", 18)
+    .attr("fill", "#aeb6c6")
+    .attr("font-size", 12)
+    .text("Weekly severity by location (top locations).");
+}
+
+
+// --- export helpers (SVG to PNG) ---
+  async function exportSvgToPng(svgEl, fileName) {
+    const svg = svgEl.cloneNode(true);
+
+    // ensure explicit size
+    const w = svgEl.getAttribute("width") || svgEl.clientWidth;
+    const h = svgEl.getAttribute("height") || svgEl.clientHeight;
+    svg.setAttribute("width", w);
+    svg.setAttribute("height", h);
+
+    const xml = new XMLSerializer().serializeToString(svg);
+    const svg64 = btoa(unescape(encodeURIComponent(xml)));
+    const image64 = "data:image/svg+xml;base64," + svg64;
+
+    const img = new Image();
+    img.src = image64;
+    await img.decode();
+
+    const canvas = document.createElement("canvas");
+    canvas.width = Number(w);
+    canvas.height = Number(h);
+    const ctx = canvas.getContext("2d");
+
+    // background fill for dark theme
+    ctx.fillStyle = "#0b0c10";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0);
+
+    const a = document.createElement("a");
+    a.download = fileName;
+    a.href = canvas.toDataURL("image/png");
+    a.click();
+  }
+
+  // --- event wiring ---
+elFile.addEventListener("change", async (evt) => {
+  const files = Array.from(evt.target.files || []);
+  if (!files.length) return;
+
+  setEnabled(false);
+  setStatus("Loading…");
+
+  try {
+    allTasks = [];
+    let invalidCount = 0;
+    let sheetCount = 0;
+
+    for (const f of files) {
+      const data = await f.arrayBuffer();
+      const wb = XLSX.read(data, { type: "array", cellDates: true });
+      sheetCount += wb.SheetNames.length;
+
+      const tasks = parseWorkbookToTasks(wb, f.name);
+      invalidCount += tasks.filter(t => !t.valid).length;
+      allTasks.push(...tasks);
+    }
+
+    const validCount = allTasks.filter(t => t.valid).length;
+    const courses = uniqueSorted(allTasks.filter(t => t.valid).map(t => t.course));
+
+    refreshFilterOptions();
+    setEnabled(true);
+
+    setStatus(
+      `Loaded files: ${files.length}
+Sheets scanned: ${sheetCount}
+Courses detected (by sheet name): ${courses.length}
+Valid tasks: ${validCount}
+Rows needing attention (missing required cells): ${invalidCount}`
+    );
+
+    applyFilters();
+  } catch (err) {
+    console.error(err);
+    setStatus(`Error while loading:\n${err && err.message ? err.message : String(err)}`);
+    setEnabled(false);
+  }
+});
+
+
+  elApply.addEventListener("click", () => applyFilters());
+  elReset.addEventListener("click", () => resetFilters());
+
+  elLikemin.addEventListener("change", () => {
+    const a = Number(elLikemin.value);
+    const b = Number(elLikemax.value);
+    if (a > b) elLikemax.value = String(a);
+  });
+
+  elLikemax.addEventListener("change", () => {
+    const a = Number(elLikemin.value);
+    const b = Number(elLikemax.value);
+    if (b < a) elLikemin.value = String(b);
+  });
+
+  elExportGantt.addEventListener("click", async () => {
+    await exportSvgToPng(document.getElementById("gantt"), "gantt.png");
+  });
+
+  elExportHeat.addEventListener("click", async () => {
+    await exportSvgToPng(document.getElementById("heat"), "severity.png");
+  });
+
+})();
+</script>
+</body>
+</html>
